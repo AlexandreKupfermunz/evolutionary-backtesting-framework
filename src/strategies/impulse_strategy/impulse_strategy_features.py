@@ -45,76 +45,72 @@ def add_timestamp_feature(df):
 
     return df
 
+def _consecutive_run_length(flag, gap_reset):
+    """Length of the consecutive run of True values in `flag` ending at each
+    index, restarting the count whenever `gap_reset` is True.
+
+    Vectorized equivalent of the previous per-row Python loop.
+    """
+    n = len(flag)
+
+    if n == 0:
+        return np.zeros(0, dtype=np.int64)
+
+    flag = flag.astype(np.int64)
+
+    # A new run starts on any bar that is not `flag`, or after a session gap.
+    group_start = (flag == 0) | gap_reset
+    group_start[0] = True
+
+    cumulative = np.cumsum(flag)
+
+    # Cumulative count just before each group start, carried forward.
+    base_at_start = np.where(group_start, cumulative - flag, -1)
+    base = np.maximum.accumulate(base_at_start)
+
+    return cumulative - base
+
 def add_impulse_features(df, max_gap_minutes=10):
 
-    consecutive_up_count = 0
-    consecutive_down_count = 0
-
-    up = df["up"].to_numpy(dtype=int)
-    down = df["down"].to_numpy(dtype=int)
+    up = df["up"].to_numpy(dtype=bool)
+    down = df["down"].to_numpy(dtype=bool)
     timestamps = df["timestamp"].to_numpy()
 
+    n = len(df)
     max_gap = np.timedelta64(max_gap_minutes, "m")
 
-    consecutive_up = []
-    consecutive_down = []
-    
-    for i in range(len(up)):
+    gap_reset = np.zeros(n, dtype=bool)
+    if n > 1:
+        gap_reset[1:] = (timestamps[1:] - timestamps[:-1]) > max_gap
 
-        if i > 0:
-            time_gap = timestamps[i] - timestamps[i-1]
-
-            if time_gap > max_gap:
-                consecutive_up_count = 0
-                consecutive_down_count = 0
-
-        if up[i]==1:
-            consecutive_down_count = 0
-            consecutive_up_count += 1
-            consecutive_up.append(consecutive_up_count)
-            consecutive_down.append(consecutive_down_count)
-        elif down[i] == 1:
-            consecutive_up_count = 0
-            consecutive_down_count += 1
-            consecutive_up.append(consecutive_up_count)
-            consecutive_down.append(consecutive_down_count)
-        else: 
-            consecutive_up_count = 0
-            consecutive_down_count = 0
-            consecutive_up.append(consecutive_up_count)
-            consecutive_down.append(consecutive_down_count)
-        
-    df["consecutive_up"] = consecutive_up
-    df["consecutive_down"] = consecutive_down
+    df["consecutive_up"] = _consecutive_run_length(up, gap_reset)
+    df["consecutive_down"] = _consecutive_run_length(down, gap_reset)
 
     return df
 
 def add_time_feature(df):
     
-    consecutive_up = df["consecutive_up"].to_numpy(dtype=int)
-    consecutive_down = df["consecutive_down"].to_numpy(dtype=int)
+    consecutive_up = df["consecutive_up"].to_numpy(dtype=np.int64)
+    consecutive_down = df["consecutive_down"].to_numpy(dtype=np.int64)
     timestamps = df["timestamp"].to_numpy()
 
-    impulse_duration_ms = [] 
+    n = len(df)
 
-    for i in range(len(df)):
+    # Only one of the two counters can be positive on a given bar.
+    run_length = np.where(consecutive_up > 0, consecutive_up, consecutive_down)
+    in_impulse = run_length > 0
 
-        n_up = consecutive_up[i]
-        n_down = consecutive_down[i]
+    indices = np.arange(n)
+    start_indices = indices - (run_length - 1)
 
-        if n_up > 0:
-            start_index = i-(n_up-1)
-            duration_ms = (timestamps[i] - timestamps[start_index]) / np.timedelta64(1, "ms")
-            impulse_duration_ms.append(duration_ms)
-        
-        elif n_down > 0:
-            start_index = i-(n_down-1)
-            duration_ms = (timestamps[i] - timestamps[start_index]) / np.timedelta64(1, "ms")
-            impulse_duration_ms.append(duration_ms)
-        
-        else:
-            impulse_duration_ms.append(None)
+    impulse_duration_ms = np.full(n, np.nan)
+    impulse_duration_ms[in_impulse] = (
+        (timestamps[indices[in_impulse]] - timestamps[start_indices[in_impulse]])
+        / np.timedelta64(1, "ms")
+    )
 
+    # NaN (instead of None) keeps the column numeric: comparisons in the
+    # signal generation evaluate to False on those bars, i.e. no signal.
     df["impulse_duration_ms"] = impulse_duration_ms
 
     return df
@@ -124,40 +120,51 @@ def precompute_imbalance_thresholds(df):
     start = int(MIN_IMBALANCE_RATIO / THRESHOLD_RATIO_STEP)
     end = int(MAX_IMBALANCE_RATIO / THRESHOLD_RATIO_STEP)
 
-    consecutive_up = df["consecutive_up"].to_numpy(dtype=int)
-    consecutive_down = df["consecutive_down"].to_numpy(dtype=int)
+    consecutive_up = df["consecutive_up"].to_numpy(dtype=np.int64)
+    consecutive_down = df["consecutive_down"].to_numpy(dtype=np.int64)
+
+    diagonal_imbalance_ratio = df["diagonal_imbalance_ratio"].to_numpy(dtype=float)
+
+    new_columns = {}
 
     for i in range(start, end + 1):
 
         threshold = round(i * THRESHOLD_RATIO_STEP, 2)
         threshold_name = format_threshold_for_column(threshold)
 
-        long_imbalance = (df["diagonal_imbalance_ratio"] > threshold).to_numpy(dtype=int)
-        short_imbalance = (df["diagonal_imbalance_ratio"] < 1 / threshold).to_numpy(dtype=int)
+        long_imbalance = (diagonal_imbalance_ratio > threshold).astype(np.int64)
+        short_imbalance = (diagonal_imbalance_ratio < 1 / threshold).astype(np.int64)
 
-        df[f"buy_imbalance_count_{threshold_name}"] = count_imbalances_in_impulse(long_imbalance, consecutive_up)
+        new_columns[f"buy_imbalance_count_{threshold_name}"] = count_imbalances_in_impulse(long_imbalance, consecutive_up)
+        new_columns[f"sell_imbalance_count_{threshold_name}"] = count_imbalances_in_impulse(short_imbalance, consecutive_down)
 
-        df[f"sell_imbalance_count_{threshold_name}"] = count_imbalances_in_impulse(short_imbalance, consecutive_down)
+    # Single concat instead of 58 individual column insertions avoids
+    # repeated DataFrame fragmentation warnings and copies.
+    for name, values in new_columns.items():
+        df[name] = values
 
     return df
 
 def count_imbalances_in_impulse(imbalance_array, consecutive_array):
 
+    n = len(imbalance_array)
+
     cumulative = np.cumsum(imbalance_array)
 
-    result = np.zeros(len(imbalance_array), dtype=int)
+    result = np.zeros(n, dtype=np.int64)
 
-    for i in range(len(imbalance_array)):
+    in_impulse = consecutive_array > 0
 
-        impulse_length = consecutive_array[i]
+    indices = np.arange(n)
+    start_indices = indices - consecutive_array + 1
 
-        if impulse_length > 0:
-            start_index = i - impulse_length + 1
+    cumulative_before_start = np.where(
+        start_indices > 0,
+        cumulative[np.maximum(start_indices - 1, 0)],
+        0
+    )
 
-            if start_index <= 0:
-                result[i] = cumulative[i]
-            else:
-                result[i] = cumulative[i] - cumulative[start_index - 1]
+    result[in_impulse] = cumulative[in_impulse] - cumulative_before_start[in_impulse]
 
     return result
 
