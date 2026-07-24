@@ -1,3 +1,5 @@
+import numpy as np
+
 class FitnessMetrics:
 
     def __init__(
@@ -39,86 +41,65 @@ class FitnessMetrics:
             "longest_losing_streak": self.longest_losing_streak
         })
 
-def calculate_fitness_metrics(trades, tick_value, commission):
 
-    net_profit = 0
-    gross_profit = 0
-    gross_loss = 0
+def calculate_fitness_metrics_from_results(results_ticks, tick_value, commission):
+    """Vectorized metrics computed directly from the array of per-trade
+    results (in ticks), as produced by backtest_to_arrays().
 
-    losing_count = 0 
-    max_losing_count = 0
+    This is the fast path used inside the GA loop: no Trade objects are
+    required.
+    """
+    number_of_trades = len(results_ticks)
 
-    equity = 0
-    highest_equity = 0
-    max_drawdown = 0
+    if number_of_trades == 0:
+        return FitnessMetrics(
+            number_of_trades=0,
+            net_profit=0,
+            gross_profit=0,
+            gross_loss=0,
+            profit_factor=float("inf"),
+            max_drawdown=0,
+            win_rate=0,
+            expectancy=0,
+            biggest_loss=0,
+            longest_losing_streak=0
+        )
 
-    win_count = 0
+    profits = np.asarray(results_ticks, dtype=np.float64) * tick_value - commission
 
-    biggest_loss = 0
-    
-    for trade in trades: 
+    winning = profits > 0
+    losing = profits < 0
 
-        single_trade_profit  = trade.result * tick_value -commission
-        
-        ##net profit
-        net_profit += single_trade_profit
+    net_profit = float(profits.sum())
+    gross_profit = float(profits[winning].sum())
+    gross_loss = float(-profits[losing].sum())
 
-        ##gross profit and loss
-        if single_trade_profit > 0:
-            gross_profit += single_trade_profit
-        elif single_trade_profit < 0:
-            gross_loss += abs(single_trade_profit)
-        
-        ##biggest_losing_streak
-        if single_trade_profit < 0:
-            losing_count +=1
-        else: 
-            losing_count = 0
-        
-        if losing_count > max_losing_count:
-            max_losing_count = losing_count
+    # Equity curve / max drawdown (peak starts at 0, as before)
+    equity = np.cumsum(profits)
+    running_peak = np.maximum(np.maximum.accumulate(equity), 0)
+    max_drawdown = float((running_peak - equity).max())
 
-        ##max drawdown
-        equity += single_trade_profit 
+    # Longest run of consecutive losing trades
+    if losing.any():
+        padded = np.concatenate(([False], losing, [False]))
+        edges = np.diff(padded.astype(np.int8))
+        run_starts = np.flatnonzero(edges == 1)
+        run_ends = np.flatnonzero(edges == -1)
+        longest_losing_streak = int((run_ends - run_starts).max())
+    else:
+        longest_losing_streak = 0
 
-        if equity > highest_equity:
-            highest_equity = equity
-
-        current_drawdown = highest_equity - equity
-
-        if current_drawdown > max_drawdown:
-            max_drawdown = current_drawdown
-
-        ##win rate
-        if single_trade_profit > 0:
-            win_count += 1
-
-        if single_trade_profit < 0:
-            loss = abs(single_trade_profit)
-
-            if loss > biggest_loss:
-                biggest_loss = loss
-
-    number_of_trades = len(trades)
-
-    ##profit factor
     if gross_loss != 0:
-        profit_factor = gross_profit/gross_loss 
+        profit_factor = gross_profit / gross_loss
     else:
         profit_factor = float("inf")
 
-    ##win rate
-    if number_of_trades != 0:
-        win_rate = win_count/number_of_trades
-    else:
-        win_rate = 0
+    win_rate = int(winning.sum()) / number_of_trades
+    average_trade = net_profit / number_of_trades
 
-    ## average trade 
-    if number_of_trades != 0:
-        average_trade = net_profit/number_of_trades
-    else:
-        average_trade = 0
-    
+    smallest = float(profits.min())
+    biggest_loss = -smallest if smallest < 0 else 0
+
     return FitnessMetrics(
         number_of_trades=number_of_trades,
         net_profit=net_profit,
@@ -129,5 +110,16 @@ def calculate_fitness_metrics(trades, tick_value, commission):
         win_rate=win_rate,
         expectancy=average_trade,
         biggest_loss=biggest_loss,
-        longest_losing_streak=max_losing_count
+        longest_losing_streak=longest_losing_streak
     )
+
+
+def calculate_fitness_metrics(trades, tick_value, commission):
+    """Backward-compatible API: accepts a list of Trade objects."""
+    results_ticks = np.fromiter(
+        (trade.result for trade in trades),
+        dtype=np.float64,
+        count=len(trades)
+    )
+
+    return calculate_fitness_metrics_from_results(results_ticks, tick_value, commission)
