@@ -1,7 +1,3 @@
-from src.trading.backtester import backtester
-from src.fitness.fitness_metrics import calculate_fitness_metrics
-from src.fitness.fitness_evaluation import evaluate_population_parallel
-
 import random
 
 THRESHOLD_RATIO_STEP = 0.25
@@ -54,42 +50,14 @@ def create_random_individual():
                      min_imbalance_count, take_profit_ticks, stop_loss_ticks)
         
     return ind
-    
-def create_initial_population(
-    df,
-    population_size,
-    generate_strategy_signals,
-    fitness_function,
-    tick_value,
-    commission,
-    maximum_holding_bars,
-    use_parallel=True,
-    n_jobs=None
-):
-    population = []
 
-    for _ in range(population_size):
-        population.append(create_random_individual())
 
-    if use_parallel:
-        population = evaluate_population_parallel(
-            df,
-            population,
-            generate_strategy_signals,
-            fitness_function,
-            tick_value,
-            commission,
-            maximum_holding_bars,
-            n_jobs
-        )
-    else:
-        for individual in population:
-            signal_df = generate_strategy_signals(df, individual)
-            trades = backtester(signal_df, individual, maximum_holding_bars)
-            fitness_metrics = calculate_fitness_metrics(trades, tick_value, commission)
-            individual.fitness = fitness_function(fitness_metrics)
+def create_random_population(population_size):
+    """Creates an unevaluated random population. Evaluation is done by the
+    caller through a PopulationEvaluator, so the same evaluator (and its
+    worker pool) can be reused across generations and windows."""
+    return [create_random_individual() for _ in range(population_size)]
 
-    return population
 
 def copy_individual(individual):
     copy = Individual(individual.min_impulse_candles, 
