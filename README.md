@@ -81,6 +81,7 @@ Each individual is one complete strategy-parameter vector. The current evolution
 - **Best-so-far tracking:** the strongest training individual observed across generations is retained separately and used for final out-of-sample evaluation.
 - **Patience-based stopping:** optimisation can stop after a configurable number of generations without training-fitness improvement.
 - **Optional parallel evaluation:** individuals can be evaluated across multiple CPU processes.
+- **Compiled backtest core:** the bar-by-bar backtest loop is JIT-compiled with [numba](https://numba.pydata.org/) when available (`pip install numba`), falling back to pure Python otherwise. The evaluation worker pool is created once per run and reused across all generations and windows.
 
 ### Available fitness functions
 
