@@ -3,6 +3,9 @@ from multiprocessing import Pool, cpu_count
 from src.trading.backtester import backtest_to_arrays
 from src.fitness.fitness_metrics import calculate_fitness_metrics_from_results
 
+import logging
+import warnings
+
 
 def _evaluate_on_window(window_df, individual, generate_strategy_signals,
                         fitness_function, tick_value, commission,
@@ -66,6 +69,9 @@ def init_worker(
     global _worker_maximum_holding_bars
     global _worker_window_bounds
     global _worker_window_df
+
+    logging.getLogger("streamlit").setLevel(logging.ERROR)
+    warnings.filterwarnings("ignore", category=Warning, module="streamlit")
 
     _worker_df = df
     _worker_generate_strategy_signals = generate_strategy_signals
