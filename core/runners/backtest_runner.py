@@ -91,6 +91,7 @@ def update_progress(progress_callback, completed_tasks, total_tasks, start_times
 
 def run_expanding_backtests(
     df,
+    worker_df,
     config,
     fitness_functions,
     progress_callback=None,
@@ -139,6 +140,7 @@ def run_expanding_backtests(
                 generation_best_individuals
             ) = run_walk_forward(
                 df=df,
+                worker_df=worker_df,
                 windows=windows,
                 number_of_generations=config.number_of_generations,
                 population_size=config.population_size,
@@ -164,6 +166,7 @@ def run_expanding_backtests(
 
 def run_rolling_backtests(
     df,
+    worker_df,
     config,
     fitness_functions,
     progress_callback=None,
@@ -220,6 +223,7 @@ def run_rolling_backtests(
                     generation_best_individuals
                 ) = run_walk_forward(
                     df=df,
+                    worker_df=worker_df,
                     windows=windows,
                     number_of_generations=config.number_of_generations,
                     population_size=config.population_size,
@@ -244,6 +248,10 @@ def run_rolling_backtests(
                 )
 
 def run_backtest_from_config(config, progress_callback=None):
+
+    import logging
+    logging.getLogger("streamlit").setLevel(logging.ERROR)
+
     print("Start of the program at:")
     start_time = datetime.now()
     print(start_time)
@@ -253,7 +261,27 @@ def run_backtest_from_config(config, progress_callback=None):
 
     df = prepare_data(config.data_path, config.trade_windows)
 
+    print(df.memory_usage(deep=True).sum() / 1e9, "GB")
+    print(df.shape, df.dtypes.value_counts())
+    print("")
+
+    worker_columns = (
+        ["Last", "High", "Low", "consecutive_up", "consecutive_down", "impulse_duration_ms"]
+        + [c for c in df.columns if c.startswith("buy_imbalance_count_") or c.startswith("sell_imbalance_count_")]
+    )
+
+    worker_df = df[worker_columns].copy()
+
+    int_cols = worker_df.select_dtypes("int64").columns
+    worker_df[int_cols] = worker_df[int_cols].astype("int16")  
+
+    print(worker_df.memory_usage(deep=True).sum() / 1e9, "GB")
+    print(worker_df.shape, worker_df.dtypes.value_counts())
+    print("")
+
     total_tasks = 0
+
+    print("Computing windows...")
 
     if config.run_expanding:
         for fitness_function in fitness_functions:
@@ -276,6 +304,8 @@ def run_backtest_from_config(config, progress_callback=None):
                 )
                 total_tasks += len(windows) * config.number_of_iterations
 
+    print("Windows computed!")
+
     progress_state = {
         "completed_tasks": 0,
         "total_tasks": total_tasks,
@@ -283,23 +313,37 @@ def run_backtest_from_config(config, progress_callback=None):
     }
 
     if config.run_expanding:
+
+        print("Running Expanding Walk Forward...")
+
         run_expanding_backtests(
             df,
+            worker_df,
             config,
             fitness_functions,
             progress_callback,
             progress_state
         )
+
+        print("Expanding Walk Forward Finished")
+        
 
     if config.run_rolling:
+
+        print("Running Rolling Walk Forward...")
+
         run_rolling_backtests(
             df,
+            worker_df,
             config,
             fitness_functions,
             progress_callback,
             progress_state
         )
 
+        print("Expanding Walk Forward Finished")
+
+    print("")
     print("End of the program at:")
     end_time = datetime.now()
     print(end_time)

@@ -1,5 +1,7 @@
 data/market_data/NQ-5D.txt*
 data/market_data/NQ-1Y.txt*
 
+*.docx
+
 __pycache__/
 *.pyc

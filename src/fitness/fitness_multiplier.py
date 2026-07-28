@@ -6,7 +6,7 @@ from src.fitness.fitness_functions import robust_fitness
 
 MINIMUM_NUMBER_OF_TRADES = 5
 
-def calculate_test_fitness_multiplier( train_df, test_df, date_column="Date"):
+def calculate_test_fitness_multiplier(train_df, test_df, date_column="Date"):
 
     train_days = train_df[date_column].nunique()
     test_days = test_df[date_column].nunique()

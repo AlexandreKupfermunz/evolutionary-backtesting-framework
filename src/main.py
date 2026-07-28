@@ -1,5 +1,5 @@
-from app.config.backtest_config import BacktestConfig
-from app.runners.backtest_runner import run_backtest_from_config
+from core.config.backtest_config import BacktestConfig
+from core.runners.backtest_runner import run_backtest_from_config
 
 
 def main():

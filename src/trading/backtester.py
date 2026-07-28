@@ -30,12 +30,7 @@ DIRECTION_LABELS = {1: "long", -1: "short"}
 def _backtest_core(long_signal, short_signal, last, high, low,
                    take_profit_ticks, stop_loss_ticks,
                    maximum_holding_bars, tick_size, slippage_value):
-    """Compiled inner loop of the backtest.
 
-    Works only on primitive numpy arrays so numba can compile it to
-    machine code. Returns compact arrays describing every trade; Trade
-    objects are built outside, only when actually needed.
-    """
     n = len(last)
 
     entry_indices = np.empty(n, dtype=np.int64)
@@ -196,12 +191,7 @@ def _backtest_core(long_signal, short_signal, last, high, low,
 
 
 def backtest_to_arrays(df, individual, maximum_holding_bars):
-    """Run the backtest and return the compact trade arrays.
 
-    This is the fast path used by the GA fitness evaluation: no Trade
-    objects are created, and the result arrays are cheap to pickle
-    between processes.
-    """
     long_signal = df["long_signal"].to_numpy(dtype=np.int8, copy=False)
     short_signal = df["short_signal"].to_numpy(dtype=np.int8, copy=False)
     last = df["Last"].to_numpy(dtype=np.float64, copy=False)
@@ -223,11 +213,7 @@ def backtest_to_arrays(df, individual, maximum_holding_bars):
 
 
 def trades_from_arrays(trade_arrays, timestamps):
-    """Build Trade objects from the compact arrays.
 
-    Only called for the individuals whose trade list is actually needed
-    (reporting, CSV export) instead of for every evaluated individual.
-    """
     (entry_indices, exit_indices, directions, entry_prices,
      exit_prices, exit_reasons, results_ticks) = trade_arrays
 
@@ -253,7 +239,7 @@ def trades_from_arrays(trade_arrays, timestamps):
 
 
 def backtester(df, individual, maximum_holding_bars):
-    """Backward-compatible API: returns a list of Trade objects."""
+
     trade_arrays = backtest_to_arrays(df, individual, maximum_holding_bars)
     timestamps = df["timestamp"].to_numpy(copy=False)
     return trades_from_arrays(trade_arrays, timestamps)

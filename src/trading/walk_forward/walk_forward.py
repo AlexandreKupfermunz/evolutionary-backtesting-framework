@@ -17,6 +17,7 @@ from src.fitness.fitness_multiplier import calculate_test_fitness_multiplier
 from src.fitness.fitness_multiplier import adjust_test_fitness
 
 def run_walk_forward(df, 
+                     worker_df,
                      windows, 
                      number_of_generations, 
                      population_size, 
@@ -40,7 +41,7 @@ def run_walk_forward(df,
     # One evaluator (and, in parallel mode, one worker pool) for the whole
     # run: reused across every generation of every window.
     evaluator = PopulationEvaluator(
-        df,
+        worker_df,
         generate_strategy_signals,
         fitness_function,
         tick_value,
@@ -69,9 +70,6 @@ def run_walk_forward(df,
             best_index = max(range(len(population)), key=lambda index: population[index].fitness)
             current_best_individual = population[best_index]
 
-            # Trades of the best individual were already computed during the
-            # population evaluation: rebuild the Trade objects from the
-            # stored arrays instead of re-running the backtest.
             original_train_trades = trades_from_arrays(trade_arrays_list[best_index], train_timestamps)
 
             generation_results.append(create_generation_result(window, 0, 0, population_statistics))
