@@ -250,7 +250,7 @@ def run_rolling_backtests(
 def run_backtest_from_config(config, progress_callback=None):
 
     import logging
-    logging.getLogger("streamlit").setLevel(logging.ERROR)
+    logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(logging.ERROR)
 
     print("Start of the program at:")
     start_time = datetime.now()
@@ -283,28 +283,38 @@ def run_backtest_from_config(config, progress_callback=None):
 
     print("Computing windows...")
 
+    expanding_windows = None
+    rolling_windows_by_size = None
+
     if config.run_expanding:
-        for fitness_function in fitness_functions:
-            windows = create_expanding_walk_forward_windows_by_days(
-                df,
-                config.expanding_initial_train_days,
-                config.test_days,
-                config.expanding_step_days
-            )
-            total_tasks += len(windows) * config.number_of_iterations
+
+        expanding_windows = create_expanding_walk_forward_windows_by_days(
+            df,
+            config.expanding_initial_train_days,
+            config.test_days,
+            config.expanding_step_days
+        )
+
+        total_tasks += len(expanding_windows) * config.number_of_iterations * len(fitness_functions)
 
     if config.run_rolling:
-        for fitness_function in fitness_functions:
-            for train_days_name, train_days_size in config.train_sizes.items():
-                windows = create_rolling_walk_forward_windows_by_days(
-                    df,
-                    train_days_size,
-                    config.test_days,
-                    config.rolling_step_days
-                )
-                total_tasks += len(windows) * config.number_of_iterations
+
+        rolling_windows_by_size = {
+            train_days_name: create_rolling_walk_forward_windows_by_days(
+                df,
+                train_days_size,
+                config.test_days,
+                config.rolling_step_days
+            )
+            for train_days_name, train_days_size in config.train_sizes.items()
+        }
+
+        for windows in rolling_windows_by_size.values():
+            total_tasks += len(windows) * config.number_of_iterations * len(fitness_functions)
+
 
     print("Windows computed!")
+    print("")
 
     progress_state = {
         "completed_tasks": 0,
