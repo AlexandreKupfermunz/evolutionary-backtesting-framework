@@ -1,3 +1,5 @@
+import pandas as pd
+
 from datetime import datetime
 
 import time
@@ -43,6 +45,8 @@ def prepare_data(data_path, sessions):
     start_loading = datetime.now()
 
     df = load_data(data_path)
+
+    df["Date"] = pd.to_datetime(df["Date"], format="%Y/%m/%d")
 
     end_loading = datetime.now()
     print("Data Loaded!")
@@ -260,6 +264,25 @@ def run_backtest_from_config(config, progress_callback=None):
     fitness_functions = get_fitness_functions_from_config(config)
 
     df = prepare_data(config.data_path, config.trade_windows)
+
+    # 1) is Date's row order already chronological, or does groupby's sort scramble it?
+    unique_dates_in_row_order = df["Date"].drop_duplicates().tolist()
+    unique_dates_sorted = sorted(df["Date"].unique())
+    print("chronological order preserved:", unique_dates_in_row_order == unique_dates_sorted)
+    print(df["Date"].dtype)
+    print(unique_dates_in_row_order[:10])
+
+    # 2) is every date's block of rows actually contiguous?
+    df_reset = df.reset_index(drop=True)
+    bad_dates = []
+    for date, group in df_reset.groupby("Date", sort=True):
+        idx = group.index
+        if idx[-1] - idx[0] + 1 != len(idx):
+            bad_dates.append((date, len(idx), idx[0], idx[-1]))
+
+    print(f"{len(bad_dates)} non-contiguous dates out of {df_reset['Date'].nunique()}")
+    for d in bad_dates[:10]:
+        print(d)
 
     print(df.memory_usage(deep=True).sum() / 1e9, "GB")
     print(df.shape, df.dtypes.value_counts())
